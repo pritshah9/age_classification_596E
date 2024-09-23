@@ -1,6 +1,6 @@
 # Classifying images based on Age/Gender
 
-This project is the individual project for 596E. It uses the MiVolo model for bounding box predictions on images and then to classify whether the person(s) is a child or an adult and classifies their gender too.
+This project is the individual project for 596E. It uses the [MiVolo](https://github.com/WildChlamydia/MiVOLO) model for bounding box predictions on images and then to classify whether the person(s) is a child or an adult and classifies their gender too.
 
 **Requirements**
 
