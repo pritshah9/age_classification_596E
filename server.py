@@ -1,12 +1,14 @@
 import argparse
 import os
+
 import cv2
 import torch
-from mivolo.predictor import Predictor
-
 from flask_ml.flask_ml_server import MLServer
 from flask_ml.flask_ml_server.constants import DataTypes
-from flask_ml.flask_ml_server.models import ResponseModel, TextResult, ImageResult
+from flask_ml.flask_ml_server.models import (ImageResult, ResponseModel,
+                                             TextResult)
+
+from mivolo.predictor import Predictor
 
 
 def get_images(folder_dir):

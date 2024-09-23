@@ -1,7 +1,8 @@
+import argparse
+
+import numpy as np
 from flask_ml.flask_ml_client import MLClient
 from flask_ml.flask_ml_server.constants import DataTypes
-import argparse
-import numpy as np
 
 url = "http://127.0.0.1:5000/classify_age_gender"  # The URL of the server
 client = MLClient(url)  # Create an instance of the MLClient object
