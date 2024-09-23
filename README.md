@@ -14,7 +14,7 @@ This project is the individual project for 596E. It uses the [MiVolo](https://gi
 **Basic Usage**
 
 1. In the command line, run `python3 server.py` to run the server. 
-2. Then run `python3 client.py --input <test_data>` where test_data is the folder containing input images you would like to classify.
+2. Then run `python3 client.py --input <test_data>` where test_data is the folder containing input images you would like to classify. Upon receiving response, it will be printed out unless output file is specified.
 3. `--output <outfile>` optional argument may be used to specify the output file name to store the response array as a npy file.
 
 **Optional CLI arguments**
