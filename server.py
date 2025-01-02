@@ -1,15 +1,20 @@
 import argparse
 import os
+import json
+import csv
+from typing import TypedDict
 
 import cv2
 import torch
-from flask_ml.flask_ml_server import MLServer
-from flask_ml.flask_ml_server.constants import DataTypes
-from flask_ml.flask_ml_server.models import (ImageResult, ResponseModel,
-                                             TextResult)
-
+from flask_ml.flask_ml_server import MLServer, load_file_as_string
+from flask_ml.flask_ml_server.models import (DirectoryInput,
+                                             EnumParameterDescriptor, EnumVal,
+                                             FileResponse, InputSchema,
+                                             InputType, ParameterSchema,
+                                             ResponseBody, TaskSchema,
+                                             TextParameterDescriptor,
+                                             BatchFileResponse)
 from mivolo.predictor import Predictor
-
 
 def get_images(folder_dir):
     images = []
@@ -18,35 +23,57 @@ def get_images(folder_dir):
             images.append(os.path.join(folder_dir, image))
     return images
 
-
 def get_parser():
     parser = argparse.ArgumentParser()
-    # parser.add_argument("--input", type=str, default=None, required=True, help="image file or folder with images")
-    # parser.add_argument("--output", type=str, default=None, required=True, help="Folder for output results")
-    parser.add_argument(
-        "--detector-weights", default="models/yolov8x_person_face.pt", type=str
-    )
-    parser.add_argument("--checkpoint", default="models/mivolo_imbd.pth.tar", type=str)
+    parser.add_argument("--detector-weights", default="models/yolov8x_person_face.pt", type=str)
+    parser.add_argument("--checkpoint", default="models/mivolo_imdb.pth.tar", type=str)
     parser.add_argument("--with-persons", action="store_false")
-    parser.add_argument("--disable-faces", action="store_true")
-    parser.add_argument("--draw", action="store_false")
+    parser.add_argument("--disable_faces", action="store_true")
     parser.add_argument("--device", default="cuda:0", type=str)
     parser.add_argument("--single-person", action="store_true")
+    parser.add_argument("--draw", action="store_false")
+    parser.add_argument("--port", default=5000, type=int)
     return parser
 
-
-def get_bbdict_from_arr(arr):
-    return {"X1": int(arr[0]), "Y1": int(arr[1]), "X2": int(arr[2]), "Y2": int(arr[3])}
-
-
 def classify_given_age(age):
-    return "child" if age <= 19 else "adult"
+    return "child" if age <= 22 else "adult"
 
-
-def update_params(params, new_params):
-    for key, value in new_params.items():
-        setattr(params, key, value)
-
+def create_transform_case_task_schema() -> TaskSchema:
+    input_schema = InputSchema(
+        key="input_directory",
+        label="Path to the directory containing all the images",
+        input_type=InputType.DIRECTORY,
+    )
+    output_schema = InputSchema(
+        key="output_directory",
+        label="Path to the output directory",
+        input_type=InputType.DIRECTORY,
+    )
+    disable_faces_schema = ParameterSchema(
+        key="single_person",
+        label="Single person flag",
+        value=EnumParameterDescriptor(
+            default="False",
+            enum_vals=[
+                EnumVal(key="True", label="True"),
+                EnumVal(key="False", label="False"),
+            ],
+        ),
+    )
+    store_images_schema = ParameterSchema(
+        key="store_images",
+        label="Store images",
+        value=EnumParameterDescriptor(
+            default="True",
+            enum_vals=[
+                EnumVal(key="True", label="True"),
+                EnumVal(key="False", label="False"),
+            ],
+        ),
+    )
+    return TaskSchema(
+        inputs=[input_schema, output_schema], parameters=[disable_faces_schema, store_images_schema]
+    )
 
 parser = get_parser()
 params = parser.parse_args()
@@ -57,22 +84,43 @@ if torch.cuda.is_available():
 
 server = MLServer(__name__)
 
+server.add_app_metadata(
+    name="Age and Gender Classifier",
+    author="User",
+    version="1.0.0",
+    info=load_file_as_string("README.md"),
+)
 
-@server.route("/classify_age_gender", DataTypes.TEXT)
-def process_text(inputs: list, parameters: dict) -> dict:
-    main_res = []
-    input_folder_dir = inputs[0].text
+class Inputs(TypedDict):
+    input_directory: DirectoryInput
+    output_directory: DirectoryInput
+
+class Params(TypedDict):
+    single_person: str
+    store_images: str
+
+
+@server.route("/classify_age_gender", task_schema_func=create_transform_case_task_schema)
+def classify(inputs: Inputs, parameters: Params) -> ResponseBody:
+    input_folder_dir = inputs["input_directory"].path
+    output_folder_dir = inputs["output_directory"].path
+    hash_name = str(torch.randint(0, 1000000, (1,)).item())
     images = get_images(input_folder_dir)
-    update_params(params, parameters)
-    single_person_flag = params.single_person
-    l = len(images)
-    c = 0
+    single_person_flag = True if parameters["single_person"] == "True" else False
+    store_images = True if parameters["store_images"] == "True" else False
+    if store_images:
+        os.makedirs(os.path.join(output_folder_dir, "outputs_" + hash_name), exist_ok=True)
+    output_images_path = os.path.join(output_folder_dir, "outputs_" + hash_name)
+
+    main_res = []
     no_predict = 0
     for image_name in images:
         avg_age = 0
         res = []
         img = cv2.imread(image_name)
-        detected_objects, out_im = predictor.recognize(img)
+        detected_objects, output_img = predictor.recognize(img)
+        if store_images:
+            cv2.imwrite(os.path.join(output_images_path, os.path.basename(image_name)), output_img)
         bboxes = detected_objects.yolo_results.boxes.xyxy.cpu().numpy()
         ages = detected_objects.ages
         genders = detected_objects.genders
@@ -82,24 +130,34 @@ def process_text(inputs: list, parameters: dict) -> dict:
                 avg_age += ages[i]
                 res.append(
                     {
-                        "bbox": get_bbdict_from_arr(bboxes[i]),
+                        "bbox": {"X1": int(bboxes[i][0]), "Y1": int(bboxes[i][1]), "X2": int(bboxes[i][2]), "Y2": int(bboxes[i][3])},
                         "label": classify_given_age(int(ages[i])),
                         "gender": genders[i],
                     }
                 )
-        if len(res) == 0:
+        if not res:
             no_predict += 1
-            main_res.append(
-                ImageResult(file_path=image_name, result=[{"no_predict": True}])
-            )
-            continue
+            main_res.append({"file_path": image_name, "result": "No person detected"})
+            continue  
         if single_person_flag:
             res = [res[0]]
             res[0]["label"] = classify_given_age(int(avg_age / len(face_indexes)))
-        main_res.append(ImageResult(file_path=image_name, result=res))
-    print("No predict: ", no_predict)
-    response = ResponseModel(results=main_res, type=DataTypes.IMAGE)
-    return response.get_response()
+        main_res.append({"file_path": image_name, "result": res})
+    
+    result_path = os.path.join(output_folder_dir, hash_name + "_result.json")
+    with open(result_path, "w") as f:
+        json.dump(main_res, f, indent=4)
 
+    child_count_dict = {image["file_path"]: sum([1 for person in image["result"] if person["label"] == "child"]) for image in main_res}
+    fil_ccd = {k: v for k, v in child_count_dict.items() if v > 0}
+    csv_path = os.path.join(output_folder_dir, hash_name + "_child_count.csv")
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["file_path", "child_count"])
+        for key, value in fil_ccd.items():
+            writer.writerow([key, value])
+    res_body = [FileResponse(path=result_path, file_type="json"), FileResponse(path=csv_path, file_type="csv")]
+    return ResponseBody(BatchFileResponse(files=res_body))
 
-server.run(port=5000)
+server.run(port=params.port)
+
