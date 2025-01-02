@@ -35,6 +35,24 @@ def get_parser():
     parser.add_argument("--port", default=5000, type=int)
     return parser
 
+def generate_img_data(imgs):
+    data = []
+    for img in imgs:
+        img_data = []
+        img_data.append(img["file_path"])
+        nf = nm = nc = na = 0
+        for person in img["result"]:
+            if person["label"] == "child": nc += 1
+            else: na += 1
+            if person["gender"] == "male": nm += 1
+            else: nf += 1
+        img_data.append(nf)
+        img_data.append(nm)
+        img_data.append(nc)
+        img_data.append(na)
+        data.append(img_data)
+    return data
+
 def classify_given_age(age):
     return "child" if age <= 22 else "adult"
 
@@ -104,7 +122,7 @@ class Params(TypedDict):
 def classify(inputs: Inputs, parameters: Params) -> ResponseBody:
     input_folder_dir = inputs["input_directory"].path
     output_folder_dir = inputs["output_directory"].path
-    hash_name = str(torch.randint(0, 1000000, (1,)).item())
+    hash_name = str(torch.randint(0, 1000000000, (1,)).item())
     images = get_images(input_folder_dir)
     single_person_flag = True if parameters["single_person"] == "True" else False
     store_images = True if parameters["store_images"] == "True" else False
@@ -148,14 +166,12 @@ def classify(inputs: Inputs, parameters: Params) -> ResponseBody:
     with open(result_path, "w") as f:
         json.dump(main_res, f, indent=4)
 
-    child_count_dict = {image["file_path"]: sum([1 for person in image["result"] if person["label"] == "child"]) for image in main_res}
-    fil_ccd = {k: v for k, v in child_count_dict.items() if v > 0}
-    csv_path = os.path.join(output_folder_dir, hash_name + "_child_count.csv")
+    img_data_dict = generate_img_data(main_res)
+    csv_path = os.path.join(output_folder_dir, hash_name + "_csv_info.csv")
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["file_path", "child_count"])
-        for key, value in fil_ccd.items():
-            writer.writerow([key, value])
+        writer.writerow(["file_path", "Num of detected females", "Num of detected males", "Num of detected children", "Num of detected adults"])
+        writer.writerows(img_data_dict)
     res_body = [FileResponse(path=result_path, file_type="json"), FileResponse(path=csv_path, file_type="csv")]
     return ResponseBody(BatchFileResponse(files=res_body))
 
